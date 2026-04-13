@@ -201,7 +201,7 @@ class CvtSrcPf:
 
 def _get_attr(filepath: str, defaultCcsid: str):
     stream = os.popen(f'/QOpenSys/usr/bin/attr {filepath}')
-    output = stream.read().strip()
+    output = stream.buffer.read().decode('utf-8', errors='replace').strip()
     attrs = {"CCSID": defaultCcsid}
     if not output.__contains__("="):
         raise Exception(f"Unable to access '{filepath}' make sure file exists and that the user has permissions to it")
