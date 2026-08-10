@@ -105,6 +105,34 @@ def test_cvtsrcpf_get_dst_mbr_name(mock_ibm_job, temp_directory):
 
 
 @patch("makei.cvtsrcpf.IBMJob")
+def test_cvtsrcpf_get_dst_mbr_name_blank_ext(mock_ibm_job, temp_directory):
+    """Test _get_dst_mbr_name with a blank source type: no trailing dot"""
+    mock_job_instance = Mock()
+    mock_ibm_job.return_value = mock_job_instance
+
+    cvt = CvtSrcPf("QRPGLESRC", "MYLIB", False, save_path=temp_directory)
+
+    assert cvt._get_dst_mbr_name("RDMLIST", "", False) == "RDMLIST"
+    assert cvt._get_dst_mbr_name("RDMLIST", "", True) == "rdmlist"
+
+
+@patch("makei.cvtsrcpf.IBMJob")
+def test_cvtsrcpf_get_dst_mbr_path_blank_ext_with_duplicates(mock_ibm_job, temp_directory):
+    """Test _get_dst_mbr_path deduplication when the source type is blank"""
+    mock_job_instance = Mock()
+    mock_ibm_job.return_value = mock_job_instance
+
+    cvt = CvtSrcPf("QRPGLESRC", "MYLIB", False, save_path=temp_directory)
+
+    existing_file = temp_directory / "rdmlist"
+    existing_file.touch()
+
+    path = cvt._get_dst_mbr_path("rdmlist", "RDMLIST", "", True)
+
+    assert path == temp_directory / "rdmlist_1"
+
+
+@patch("makei.cvtsrcpf.IBMJob")
 def test_cvtsrcpf_get_dst_mbr_path(mock_ibm_job, temp_directory):
     """Test _get_dst_mbr_path method"""
     mock_job_instance = Mock()

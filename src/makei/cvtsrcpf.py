@@ -145,7 +145,7 @@ class CvtSrcPf:
         return src_mbr_ext
 
     def _get_dst_mbr_name(self, src_mbr_name, src_mbr_ext, tolower: bool) -> str:
-        dst_mbr_name = f"{src_mbr_name}.{src_mbr_ext}"
+        dst_mbr_name = f"{src_mbr_name}.{src_mbr_ext}" if src_mbr_ext else src_mbr_name
         if tolower:
             dst_mbr_name = dst_mbr_name.lower()
         return dst_mbr_name
@@ -156,9 +156,7 @@ class CvtSrcPf:
         while dst_mbr_path.exists():
             # if dst_mbr_name exists, rename it
             dups += 1
-            dst_mbr_name = f"{src_mbr_name}_{dups}.{src_mbr_ext}"
-            if tolower:
-                dst_mbr_name = dst_mbr_name.lower()
+            dst_mbr_name = self._get_dst_mbr_name(f"{src_mbr_name}_{dups}", src_mbr_ext, tolower)
             dst_mbr_path = self.save_path / dst_mbr_name
         return dst_mbr_path
 
