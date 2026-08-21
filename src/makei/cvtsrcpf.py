@@ -110,12 +110,13 @@ class CvtSrcPf:
         if validate_ccsid(src_ccsid):
             self.default_ccsid = src_ccsid
         else:
-            # 65535 means "binary, do not convert", so CPYTOSTMF has no source
-            # encoding to convert to UTF-8 from and every member fails. Fall back
-            # to what --ccsid says the bytes actually are, and pass it on the copy.
+            # 65535 means "binary, do not convert": CPYTOSTMF fails outright on a
+            # source file with that CCSID, so it has to be told what the bytes
+            # really are. DBFCCSID takes a number and no special value but *FILE,
+            # so *JOB -- what --ccsid defaults to -- has to be resolved first.
             self.default_ccsid = fallback_ccsid
-            self.dbf_ccsid = None if fallback_ccsid == "*JOB" else fallback_ccsid
-            print(f"Source file CCSID is {src_ccsid}; copying as {self.default_ccsid}.")
+            self.dbf_ccsid = self._job_ccsid() if fallback_ccsid == "*JOB" else fallback_ccsid
+            print(f"Source file CCSID is {src_ccsid}; copying as {self.dbf_ccsid}.")
 
         print(f"{len(src_mbrs)} source members found.")
         cvt_count = 0
@@ -153,6 +154,20 @@ class CvtSrcPf:
                 f"failed to convert: {', '.join(failed_mbrs)}")
 
         return cvt_count
+
+    def _job_ccsid(self) -> Optional[str]:
+        """What *JOB is worth to a copy that cannot use the source file's CCSID.
+
+        DEFAULT_CCSID rather than CCSID: a job's CCSID can itself be 65535, its
+        default job CCSID never is.
+        """
+        results = self.job.run_sql(
+            "SELECT DEFAULT_CCSID FROM TABLE("
+            "QSYS2.ACTIVE_JOB_INFO(JOB_NAME_FILTER => '*', DETAILED_INFO => 'ALL'))",
+            ignore_errors=True)
+        if results and results[0]:
+            return str(results[0][0][0])
+        return None
 
     def _default_ccsid(self) -> str:
         if self.default_ccsid is None:

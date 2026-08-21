@@ -307,6 +307,33 @@ def test_cvtsrcpf_run_with_binary_ccsid_and_failed_member(
     assert "DBFCCSID(37) " in mock_job_instance.run_cl.call_args[0][0]
 
 
+@patch("makei.cvtsrcpf.create_ibmi_json")
+@patch("makei.cvtsrcpf.retrieve_ccsid")
+@patch("makei.cvtsrcpf.objlib_to_path")
+@patch("makei.cvtsrcpf.IBMJob")
+def test_cvtsrcpf_run_with_binary_ccsid_and_no_ccsid_argument(
+    mock_ibm_job, mock_objlib_to_path, mock_retrieve_ccsid, mock_create_ibmi_json, temp_directory
+):
+    """Test run on a 65535 source file with no --ccsid: DBFCCSID takes no *JOB,
+    so the job's default CCSID is resolved and passed instead"""
+    mock_job_instance = Mock()
+    mock_ibm_job.return_value = mock_job_instance
+    mock_job_instance.run_sql.side_effect = [
+        ([("PROOF", "RPGLE")], ["SYSTEM_TABLE_MEMBER", "SOURCE_TYPE"]),
+        ([(37,)], ["DEFAULT_CCSID"]),
+    ]
+    mock_job_instance.run_cl.return_value = True
+    mock_objlib_to_path.return_value = str(temp_directory)
+    mock_retrieve_ccsid.return_value = "65535"
+
+    cvt = CvtSrcPf("QRPGLESRC", "QGPL", True, save_path=temp_directory)
+
+    assert cvt.run() == 1
+    assert "DBFCCSID(37) " in mock_job_instance.run_cl.call_args[0][0]
+    # .ibmi.json still records *JOB; only the copy needs the resolved number
+    assert cvt.default_ccsid == "*JOB"
+
+
 @patch("makei.cvtsrcpf.IBMJob")
 def test_cvtsrcpf_import_member_text_missing_file(mock_ibm_job, temp_directory):
     """Test import_member_text when the conversion wrote nothing"""
