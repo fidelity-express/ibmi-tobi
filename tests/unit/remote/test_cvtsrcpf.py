@@ -240,6 +240,84 @@ def test_cvtsrcpf_cvr_src_mbr(mock_ibm_job, temp_directory):
 
     assert result is True
     mock_job_instance.run_cl.assert_called_once()
+    assert "DBFCCSID" not in mock_job_instance.run_cl.call_args[0][0]
+
+
+@patch("makei.cvtsrcpf.IBMJob")
+def test_cvtsrcpf_cvr_src_mbr_failure(mock_ibm_job, temp_directory):
+    """Test _cvr_src_mbr reports a copy the system refused"""
+    mock_job_instance = Mock()
+    mock_ibm_job.return_value = mock_job_instance
+    mock_job_instance.run_cl.return_value = False
+
+    cvt = CvtSrcPf("QRPGLESRC", "MYLIB", False, save_path=temp_directory)
+
+    srcpath = Path("/QSYS.LIB/MYLIB.LIB/QRPGLESRC.FILE")
+    dst_path = temp_directory / "testpgm.rpgle"
+
+    result = cvt._cvr_src_mbr("TESTPGM", srcpath, "testpgm.rpgle", dst_path)
+
+    assert result is False
+
+
+@patch("makei.cvtsrcpf.IBMJob")
+def test_cvtsrcpf_cvr_src_mbr_binary_ccsid(mock_ibm_job, temp_directory):
+    """Test _cvr_src_mbr tells CPYTOSTMF the CCSID when the file's own is unusable"""
+    mock_job_instance = Mock()
+    mock_ibm_job.return_value = mock_job_instance
+    mock_job_instance.run_cl.return_value = True
+
+    cvt = CvtSrcPf("QRPGLESRC", "QGPL", True, save_path=temp_directory)
+    cvt.dbf_ccsid = "37"
+
+    srcpath = Path("/QSYS.LIB/QGPL.LIB/QRPGLESRC.FILE")
+    dst_path = temp_directory / "proof.rpgle"
+
+    cvt._cvr_src_mbr("PROOF", srcpath, "proof.rpgle", dst_path)
+
+    assert "DBFCCSID(37) " in mock_job_instance.run_cl.call_args[0][0]
+
+
+@patch("makei.cvtsrcpf.create_ibmi_json")
+@patch("makei.cvtsrcpf.retrieve_ccsid")
+@patch("makei.cvtsrcpf.objlib_to_path")
+@patch("makei.cvtsrcpf.IBMJob")
+def test_cvtsrcpf_run_with_binary_ccsid_and_failed_member(
+    mock_ibm_job, mock_objlib_to_path, mock_retrieve_ccsid, mock_create_ibmi_json, temp_directory
+):
+    """Test run on a 65535 source file: copy as --ccsid, and report a member that
+    failed instead of dying on the file the failed copy never wrote"""
+    mock_job_instance = Mock()
+    mock_ibm_job.return_value = mock_job_instance
+    mock_job_instance.run_sql.return_value = (
+        [("PROOF", "RPGLE")],
+        ["SYSTEM_TABLE_MEMBER", "SOURCE_TYPE"],
+    )
+    mock_job_instance.run_cl.return_value = False
+    mock_objlib_to_path.return_value = str(temp_directory)
+    mock_retrieve_ccsid.return_value = "65535"
+
+    cvt = CvtSrcPf(
+        "QRPGLESRC", "QGPL", True, default_ccsid="37", text=True, save_path=temp_directory
+    )
+
+    with pytest.raises(Exception, match="failed to convert: PROOF"):
+        cvt.run()
+
+    assert "DBFCCSID(37) " in mock_job_instance.run_cl.call_args[0][0]
+
+
+@patch("makei.cvtsrcpf.IBMJob")
+def test_cvtsrcpf_import_member_text_missing_file(mock_ibm_job, temp_directory):
+    """Test import_member_text when the conversion wrote nothing"""
+    mock_job_instance = Mock()
+    mock_ibm_job.return_value = mock_job_instance
+
+    cvt = CvtSrcPf("QRPGLESRC", "MYLIB", False, save_path=temp_directory)
+
+    result = cvt.import_member_text(str(temp_directory / "proof.rpgle"), "Check out Installation")
+
+    assert result is False
 
 
 @patch("makei.cvtsrcpf.IBMJob")

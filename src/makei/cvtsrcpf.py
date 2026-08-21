@@ -19,6 +19,7 @@ class CvtSrcPf:
     srcfile: str
     save_path: Path
     default_ccsid: Optional[str]
+    dbf_ccsid: Optional[str]
     tolower: bool
     ibmi_json_path: Optional[Path]
     store_member_text: bool
@@ -37,6 +38,8 @@ class CvtSrcPf:
             self.default_ccsid = default_ccsid
         else:
             self.default_ccsid = None
+        # Only set for a source file whose own CCSID cannot drive the copy; see run().
+        self.dbf_ccsid = None
 
         self.tolower = tolower
         self.ibmi_json_path = save_path / ".ibmi.json"
@@ -65,6 +68,12 @@ class CvtSrcPf:
             return False
 
     def import_member_text(self, file_path: str, member_text: str) -> bool:
+        if not Path(file_path).is_file():
+            # Nothing was written -- the conversion failed. Say so rather than
+            # dying on the open() a few lines down.
+            print(f"Cannot import member text: {file_path} was not written")
+            return False
+
         # Check if member text exists
         metadata_comment_exists = check_keyword_in_file(file_path, METADATA_HEADER, MEMBER_TEXT_LINES)
         if metadata_comment_exists:
@@ -96,14 +105,21 @@ class CvtSrcPf:
         if not srcpath.exists():
             raise Exception(f"Source file '{srcpath}' does not exist")
         src_mbrs = self._get_src_mbrs()
-        src_ccsid = retrieve_ccsid(str(srcpath), self._default_ccsid())
+        fallback_ccsid = self._default_ccsid()
+        src_ccsid = retrieve_ccsid(str(srcpath), fallback_ccsid)
         if validate_ccsid(src_ccsid):
             self.default_ccsid = src_ccsid
         else:
-            self.default_ccsid = "*JOB"
+            # 65535 means "binary, do not convert", so CPYTOSTMF has no source
+            # encoding to convert to UTF-8 from and every member fails. Fall back
+            # to what --ccsid says the bytes actually are, and pass it on the copy.
+            self.default_ccsid = fallback_ccsid
+            self.dbf_ccsid = None if fallback_ccsid == "*JOB" else fallback_ccsid
+            print(f"Source file CCSID is {src_ccsid}; copying as {self.default_ccsid}.")
 
         print(f"{len(src_mbrs)} source members found.")
         cvt_count = 0
+        failed_mbrs = []
         for src_mbr in src_mbrs:
             src_mbr_name = self._get_src_mbr_name(src_mbr)
             src_mbr_ext = self._get_src_mbr_ext(src_mbr)
@@ -121,9 +137,20 @@ class CvtSrcPf:
                         successfulImport = self.import_member_text(dst_mbr_path, member_text)
                         if successfulImport:
                             print("Successfully imported member text!")
+            else:
+                failed_mbrs.append(src_mbr_name)
+                print(f"Failed to convert {src_mbr_name}")
 
         if self.ibmi_json_path:
             create_ibmi_json(self.ibmi_json_path, tgt_ccsid=self.default_ccsid)
+
+        if failed_mbrs:
+            # A silently short conversion is worse than a loud one: the caller has
+            # no other way to tell a source file with few members from one that
+            # mostly failed to copy.
+            raise Exception(
+                f"{len(failed_mbrs)} of {len(src_mbrs)} members of {self.lib}/{self.srcfile} "
+                f"failed to convert: {', '.join(failed_mbrs)}")
 
         return cvt_count
 
@@ -164,9 +191,10 @@ class CvtSrcPf:
         """Convert the source member
         """
         print(f"Converting {src_mbr_name} to {dst_mbr_name}")
+        dbf_ccsid = f"DBFCCSID({self.dbf_ccsid}) " if self.dbf_ccsid else ""
         return self.job.run_cl(
             f"CPYTOSTMF FROMMBR('{srcpath}/{src_mbr_name}.MBR') "
-            f"TOSTMF('{dst_mbr_path}') ENDLINFMT(*LF) STMFCCSID(1208) STMFOPT(*REPLACE)",
+            f"TOSTMF('{dst_mbr_path}') {dbf_ccsid}ENDLINFMT(*LF) STMFCCSID(1208) STMFOPT(*REPLACE)",
             ignore_errors=True, log=True)
 
     def _get_member_text(self, src_mbr_name, srcpath):
