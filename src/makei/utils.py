@@ -419,9 +419,13 @@ def get_line(file_path: str, line_number: int) -> str:
         return None
 
 
-# Returns the file extension from a filepath
+# Returns the file extension from a filepath, or "" if it has none
 def get_file_extension(file_path: Path) -> str:
-    extension = file_path.name.split(".", 1)[1]
+    # A member with a blank source type is converted to a name with no extension
+    # at all, so there is not always a dot to split on.
+    _, dot, extension = file_path.name.partition(".")
+    if not dot:
+        return ""
     if extension.upper() == ".SRC":
         extension = ".PF"
     return extension
