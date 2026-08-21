@@ -19,6 +19,7 @@ class CvtSrcPf:
     srcfile: str
     save_path: Path
     default_ccsid: Optional[str]
+    requested_ccsid: Optional[str]
     dbf_ccsid: Optional[str]
     tolower: bool
     ibmi_json_path: Optional[Path]
@@ -38,6 +39,8 @@ class CvtSrcPf:
             self.default_ccsid = default_ccsid
         else:
             self.default_ccsid = None
+        # Kept unvalidated too: see _requested_ccsid.
+        self.requested_ccsid = default_ccsid
         # Only set for a source file whose own CCSID cannot drive the copy; see run().
         self.dbf_ccsid = None
 
@@ -106,7 +109,8 @@ class CvtSrcPf:
             raise Exception(f"Source file '{srcpath}' does not exist")
         src_mbrs = self._get_src_mbrs()
         fallback_ccsid = self._default_ccsid()
-        src_ccsid = retrieve_ccsid(str(srcpath), fallback_ccsid)
+        src_ccsid = self._src_data_ccsid() or retrieve_ccsid(str(srcpath), fallback_ccsid)
+        print(f"Source data CCSID is {src_ccsid}.")
         if validate_ccsid(src_ccsid):
             self.default_ccsid = src_ccsid
         else:
@@ -115,8 +119,14 @@ class CvtSrcPf:
             # really are. DBFCCSID takes a number and no special value but *FILE,
             # so *JOB -- what --ccsid defaults to -- has to be resolved first.
             self.default_ccsid = fallback_ccsid
-            self.dbf_ccsid = self._job_ccsid() if fallback_ccsid == "*JOB" else fallback_ccsid
-            print(f"Source file CCSID is {src_ccsid}; copying as {self.dbf_ccsid}.")
+            self.dbf_ccsid = self._requested_ccsid() or self._job_ccsid()
+            if not self.dbf_ccsid:
+                # Every member would fail. Say why now, once, rather than once a
+                # member with nothing to point at.
+                raise Exception(
+                    f"{self.lib}/{self.srcfile} holds CCSID {src_ccsid} data and the job's "
+                    "own CCSID could not be read: pass --ccsid to say what the data is")
+            print(f"Copying it as CCSID {self.dbf_ccsid}.")
 
         print(f"{len(src_mbrs)} source members found.")
         cvt_count = 0
@@ -154,6 +164,35 @@ class CvtSrcPf:
                 f"failed to convert: {', '.join(failed_mbrs)}")
 
         return cvt_count
+
+    def _requested_ccsid(self) -> Optional[str]:
+        """--ccsid as it was given, whether or not validate_ccsid could confirm it.
+
+        That check shells out to `attr` by name and quietly discards the value
+        when it cannot run it. A number the caller typed is a better answer than
+        no answer at all when the copy cannot proceed without one.
+        """
+        if self.requested_ccsid and self.requested_ccsid.isdigit():
+            return self.requested_ccsid
+        return None
+
+    def _src_data_ccsid(self) -> Optional[str]:
+        """The CCSID of the source data itself, from the catalog.
+
+        This is the CCSID CPYTOSTMF has to convert from, and the catalog is the
+        only place that reliably states it: `attr` reports what the QSYS.LIB file
+        system holds for the object, which need not be the same and need not be
+        reported at all -- and when it is absent, retrieve_ccsid hands back the
+        fallback it was given, so a binary source file looks perfectly ordinary.
+        """
+        results = self.job.run_sql(
+            "SELECT CCSID FROM QSYS2.SYSCOLUMNS WHERE "
+            f"TABLE_SCHEMA = '{self.lib.upper()}' AND TABLE_NAME = '{self.srcfile.upper()}' "
+            "AND COLUMN_NAME = 'SRCDTA'",
+            ignore_errors=True)
+        if results and results[0] and results[0][0][0] is not None:
+            return str(results[0][0][0])
+        return None
 
     def _job_ccsid(self) -> Optional[str]:
         """What *JOB is worth to a copy that cannot use the source file's CCSID.
