@@ -285,17 +285,19 @@ def test_cvtsrcpf_cvr_src_mbr_binary_ccsid(mock_ibm_job, temp_directory):
 def test_cvtsrcpf_run_with_binary_ccsid_and_failed_member(
     mock_ibm_job, mock_objlib_to_path, mock_retrieve_ccsid, mock_create_ibmi_json, temp_directory
 ):
-    """Test run on a 65535 source file: copy as --ccsid, and report a member that
-    failed instead of dying on the file the failed copy never wrote"""
+    """Test run on a 65535 source file: the catalog is believed over attr, the
+    copy is told the CCSID, and a member that failed is reported rather than
+    dying on the file the failed copy never wrote"""
     mock_job_instance = Mock()
     mock_ibm_job.return_value = mock_job_instance
-    mock_job_instance.run_sql.return_value = (
-        [("PROOF", "RPGLE")],
-        ["SYSTEM_TABLE_MEMBER", "SOURCE_TYPE"],
-    )
+    mock_job_instance.run_sql.side_effect = [
+        ([("PROOF", "RPGLE")], ["SYSTEM_TABLE_MEMBER", "SOURCE_TYPE"]),
+        ([(65535,)], ["CCSID"]),
+    ]
     mock_job_instance.run_cl.return_value = False
     mock_objlib_to_path.return_value = str(temp_directory)
-    mock_retrieve_ccsid.return_value = "65535"
+    # attr saying something usable must not hide what the catalog says
+    mock_retrieve_ccsid.return_value = "37"
 
     cvt = CvtSrcPf(
         "QRPGLESRC", "QGPL", True, default_ccsid="37", text=True, save_path=temp_directory
@@ -320,6 +322,7 @@ def test_cvtsrcpf_run_with_binary_ccsid_and_no_ccsid_argument(
     mock_ibm_job.return_value = mock_job_instance
     mock_job_instance.run_sql.side_effect = [
         ([("PROOF", "RPGLE")], ["SYSTEM_TABLE_MEMBER", "SOURCE_TYPE"]),
+        ([(65535,)], ["CCSID"]),
         ([(37,)], ["DEFAULT_CCSID"]),
     ]
     mock_job_instance.run_cl.return_value = True
@@ -332,6 +335,33 @@ def test_cvtsrcpf_run_with_binary_ccsid_and_no_ccsid_argument(
     assert "DBFCCSID(37) " in mock_job_instance.run_cl.call_args[0][0]
     # .ibmi.json still records *JOB; only the copy needs the resolved number
     assert cvt.default_ccsid == "*JOB"
+
+
+@patch("makei.cvtsrcpf.create_ibmi_json")
+@patch("makei.cvtsrcpf.retrieve_ccsid")
+@patch("makei.cvtsrcpf.objlib_to_path")
+@patch("makei.cvtsrcpf.IBMJob")
+def test_cvtsrcpf_run_with_binary_ccsid_and_no_ccsid_anywhere(
+    mock_ibm_job, mock_objlib_to_path, mock_retrieve_ccsid, mock_create_ibmi_json, temp_directory
+):
+    """Test run on a 65535 source file when the job's CCSID cannot be read
+    either: say so instead of issuing copies that are certain to fail"""
+    mock_job_instance = Mock()
+    mock_ibm_job.return_value = mock_job_instance
+    mock_job_instance.run_sql.side_effect = [
+        ([("PROOF", "RPGLE")], ["SYSTEM_TABLE_MEMBER", "SOURCE_TYPE"]),
+        ([(65535,)], ["CCSID"]),
+        None,
+    ]
+    mock_objlib_to_path.return_value = str(temp_directory)
+    mock_retrieve_ccsid.return_value = "65535"
+
+    cvt = CvtSrcPf("QRPGLESRC", "QGPL", True, save_path=temp_directory)
+
+    with pytest.raises(Exception, match="pass --ccsid"):
+        cvt.run()
+
+    mock_job_instance.run_cl.assert_not_called()
 
 
 @patch("makei.cvtsrcpf.IBMJob")
