@@ -1,4 +1,5 @@
-from makei.utils import make_include_dirs_absolute, decompose_filename, get_target_patterns_for_makefile
+from makei.utils import (make_include_dirs_absolute, decompose_filename, get_target_patterns_for_makefile,
+                         get_file_extension, get_style_dict)
 import json
 import pytest
 from pathlib import Path
@@ -394,3 +395,19 @@ def test_get_target_patterns_for_makefile_integration_with_build():
     # Check sorting
     patterns = result.split()
     assert patterns == sorted(patterns), "Target patterns should be in sorted order"
+
+
+def test_get_file_extension():
+    """Test get_file_extension with an extension present"""
+    assert get_file_extension(Path("/a/b/testpgm.rpgle")) == "rpgle"
+    assert get_file_extension(Path("/a/b/testpgm.pgm.rpgle")) == "pgm.rpgle"
+
+
+def test_get_file_extension_no_extension():
+    """Test get_file_extension on a blank source type: no extension, no crash"""
+    assert get_file_extension(Path("/a/b/me_bp_sg")) == ""
+
+
+def test_get_style_dict_no_extension():
+    """Test get_style_dict has no comment style for a name with no extension"""
+    assert get_style_dict(Path("/a/b/me_bp_sg")) is None
